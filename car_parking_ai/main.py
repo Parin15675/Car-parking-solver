@@ -17,14 +17,13 @@ from search import a_star, heuristic, is_goal, set_move_provider
 WINDOW_SIZE = 720
 FPS = 60
 BUTTON_WIDTH = 180
-BUTTON_HEIGHT = 48
-BUTTON_MARGIN = 16
-BOTTOM_PANEL_HEIGHT = 320
+BUTTON_HEIGHT = 45
+BUTTON_MARGIN = 12
+BOTTOM_PANEL_HEIGHT = 140
+TOP_PANEL_HEIGHT = 55
+UNDO_REDO_BUTTON_SIZE = 45
 DIFFICULTY_LEVELS: Dict[str, List[str]] = {
-    "Beginner": ["beginner_01.json", "beginner_02.json", "beginner_03.json"],
-    "Intermediate": ["intermediate_01.json", "intermediate_02.json", "intermediate_03.json"],
-    "Advanced": ["advanced_01.json", "advanced_02.json", "advanced_03.json"],
-    "Expert": ["expert_01.json", "expert_02.json", "expert_03.json"],
+    "Expert": [f"expert_{index:02d}.json" for index in range(1, 21)],
 }
 
 
@@ -62,13 +61,18 @@ class Particle:
 class Button:
     """Modern interactive button widget with animations."""
 
-    def __init__(self, label: str, position: Tuple[int, int], callback: Callable[[], None]) -> None:
+    click_sound_callback: Optional[Callable[[str, float], None]] = None
+
+    def __init__(self, label: str, position: Tuple[int, int], callback: Callable[[], None],
+                 width: int = BUTTON_WIDTH, height: int = BUTTON_HEIGHT) -> None:
         self.label = label
-        self.rect = pygame.Rect(position[0], position[1], BUTTON_WIDTH, BUTTON_HEIGHT)
+        self.rect = pygame.Rect(position[0], position[1], width, height)
         self.callback = callback
         self.hover = False
         self.click_animation = 0.0
         self.hover_scale = 0.0
+        self.width = width
+        self.height = height
 
     def draw(self, screen: pygame.Surface, font: pygame.font.Font) -> None:
         """Render the button with smooth hover and click animations."""
@@ -138,26 +142,83 @@ class Button:
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos):
                 self.click_animation = 1.0
+                if Button.click_sound_callback:
+                    Button.click_sound_callback("click", 0.4)
                 self.callback()
 
 
 def main() -> None:
     """Entrypoint that prepares pygame, loads a level, and runs the loop."""
     pygame.init()
-    screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE + BOTTOM_PANEL_HEIGHT))
-    pygame.display.set_caption("Rush Hour AI Solver - Modern Edition")
+    screen = pygame.display.set_mode((WINDOW_SIZE, TOP_PANEL_HEIGHT + WINDOW_SIZE + BOTTOM_PANEL_HEIGHT))
+    pygame.display.set_caption("Rush Hour AI Solver - Pixel Edition")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("segoeui", 18)
-    button_font = pygame.font.SysFont("segoeui", 20, bold=True)
-    title_font = pygame.font.SysFont("segoeui", 56, bold=True)
-    subtitle_font = pygame.font.SysFont("segoeui", 24)
+
+    # Pixel-style fonts (using monospace/retro style fonts)
+    pixel_fonts = ["Courier New", "Consolas", "monospace"]
+    font = pygame.font.SysFont(pixel_fonts, 16)
+    info_font = pygame.font.SysFont(pixel_fonts, 15)
+    button_font = pygame.font.SysFont(pixel_fonts, 20, bold=True)
+    arrow_font = pygame.font.SysFont(pixel_fonts, 32, bold=True)
+    title_font = pygame.font.SysFont(pixel_fonts, 56, bold=True)
+    subtitle_font = pygame.font.SysFont(pixel_fonts, 24, bold=True)
+    puzzle_number_font = pygame.font.SysFont(pixel_fonts, 36, bold=True)
 
     base_dir = Path(__file__).resolve().parent
     asset_dir = base_dir / "assets"
     puzzle_dir = base_dir / "puzzles"
     logic_file = base_dir / "logic.pl"
+    sounds_dir = base_dir / "sounds"
 
     game = Game(asset_dir=asset_dir, logic_path=logic_file)
+
+    # Initialize sound system
+    pygame.mixer.init()
+    sound_enabled = True
+    sounds: Dict[str, Optional[pygame.mixer.Sound]] = {
+        "click": None,
+        "move": None,
+        "undo": None,
+        "win": None,
+    }
+
+    # Load sound effects if available
+    if sounds_dir.exists():
+        sound_files = {
+            "click": "click.wav",
+            "move": "move.wav",
+            "undo": "undo.wav",
+            "win": "win.wav",
+        }
+        for sound_name, filename in sound_files.items():
+            sound_path = sounds_dir / filename
+            if sound_path.exists():
+                try:
+                    sounds[sound_name] = pygame.mixer.Sound(str(sound_path))
+                except pygame.error:
+                    pass
+
+    # Load background music if available
+    bg_music_path = sounds_dir / "bgm.wav" if sounds_dir.exists() else None
+    if bg_music_path and bg_music_path.exists():
+        try:
+            pygame.mixer.music.load(str(bg_music_path))
+            pygame.mixer.music.set_volume(0.3)
+            pygame.mixer.music.play(-1)  # Loop indefinitely
+        except pygame.error:
+            pass
+
+    def play_sound(sound_name: str, volume: float = 0.25) -> None:
+        """Play a sound effect if available and sound is enabled."""
+        if sound_enabled and sounds.get(sound_name):
+            try:
+                sounds[sound_name].set_volume(volume)
+                sounds[sound_name].play()
+            except:
+                pass
+
+    # Set up button click sound
+    Button.click_sound_callback = play_sound
 
     # Visual effects
     particles: List[Particle] = []
@@ -234,8 +295,10 @@ def main() -> None:
         moved = game.step_solution()
         if moved:
             _push_undo_snapshot(prev_state, prev_manual)
+            play_sound("move", 0.4)
             return
         trigger_success("SUCCESS! Puzzle complete.")
+        play_sound("win", 0.7)
         # Victory particles
         for _ in range(50):
             x = random.uniform(WINDOW_SIZE * 0.3, WINDOW_SIZE * 0.7)
@@ -320,6 +383,7 @@ def main() -> None:
         _apply_state(state, manual_value)
         status_message = "Undid last move."
         status_fade = 1.0
+        play_sound("undo", 0.3)
 
     def redo_move() -> None:
         nonlocal status_message, status_fade
@@ -331,29 +395,34 @@ def main() -> None:
             undo_stack.append((game.current_state, manual_move_count))
         state, manual_value = redo_stack.pop()
         _apply_state(state, manual_value)
+        play_sound("undo", 0.3)
         status_message = "Redid move."
         status_fade = 1.0
 
-    bottom_button_specs: List[Tuple[str, Callable[[], None]]] = [
-        ("Start Solver", start_solver),
-        ("Next Step", next_step),
-        ("Reset", reset_level),
-        ("Menu", return_to_menu),
-        ("Undo", undo_move),
-        ("Redo", redo_move),
-    ]
     buttons: List[Button] = []
-    columns = 3
-    button_rows = math.ceil(len(bottom_button_specs) / columns)
-    for index, (label, callback) in enumerate(bottom_button_specs):
-        row = index // columns
-        col_in_row = index % columns if row < button_rows - 1 else index - columns * (button_rows - 1)
-        items_in_row = columns if row < button_rows - 1 else len(bottom_button_specs) - columns * (button_rows - 1)
-        row_width = items_in_row * BUTTON_WIDTH + max(0, items_in_row - 1) * BUTTON_MARGIN
-        row_start_x = (WINDOW_SIZE - row_width) / 2
-        x = int(row_start_x + col_in_row * (BUTTON_WIDTH + BUTTON_MARGIN))
-        y = int(WINDOW_SIZE + BUTTON_MARGIN + row * (BUTTON_HEIGHT + BUTTON_MARGIN))
-        buttons.append(Button(label, (x, y), callback))
+
+    # Create undo/redo buttons at the top (arrow buttons)
+    undo_redo_buttons: List[Button] = []
+    undo_button = Button("←", (BUTTON_MARGIN, 5), undo_move,
+                        width=UNDO_REDO_BUTTON_SIZE, height=UNDO_REDO_BUTTON_SIZE)
+    redo_button = Button("→", (BUTTON_MARGIN * 2 + UNDO_REDO_BUTTON_SIZE, 5), redo_move,
+                        width=UNDO_REDO_BUTTON_SIZE, height=UNDO_REDO_BUTTON_SIZE)
+    undo_redo_buttons.append(undo_button)
+    undo_redo_buttons.append(redo_button)
+
+    # Bottom buttons - Row 1: Start Solver & Reset, Row 2: Menu (full width)
+    row_width = 2 * BUTTON_WIDTH + BUTTON_MARGIN
+    row_start_x = (WINDOW_SIZE - row_width) // 2
+    y_row1 = TOP_PANEL_HEIGHT + WINDOW_SIZE + BUTTON_MARGIN
+    y_row2 = y_row1 + BUTTON_HEIGHT + BUTTON_MARGIN
+
+    # Row 1: Start Solver and Reset
+    buttons.append(Button("Start Solver", (row_start_x, y_row1), start_solver))
+    buttons.append(Button("Reset", (row_start_x + BUTTON_WIDTH + BUTTON_MARGIN, y_row1), reset_level))
+
+    # Row 2: Menu (full width)
+    menu_button_width = row_width
+    buttons.append(Button("Menu", (row_start_x, y_row2), return_to_menu, width=menu_button_width))
 
     # Create menu buttons for each difficulty level
     menu_buttons = []
@@ -362,8 +431,15 @@ def main() -> None:
 
     def create_difficulty_menu():
         """Create buttons for difficulty selection."""
-        nonlocal menu_buttons
+        nonlocal menu_buttons, menu_state, selected_difficulty
         menu_buttons = []
+
+        if len(DIFFICULTY_LEVELS) == 1:
+            selected_difficulty = next(iter(DIFFICULTY_LEVELS))
+            menu_state = "puzzle_select"
+            create_puzzle_menu(selected_difficulty)
+            return
+
         for index, difficulty in enumerate(DIFFICULTY_LEVELS.keys()):
             x_offset = (WINDOW_SIZE - BUTTON_WIDTH) // 2
             y_offset = 260 + index * (BUTTON_HEIGHT + 20)
@@ -384,11 +460,27 @@ def main() -> None:
         menu_buttons = []
         puzzles = DIFFICULTY_LEVELS[difficulty]
 
+        # Use grid layout for 10 puzzles - 4 columns, 3 rows
+        max_cols = 4
+        button_width = 85
+        button_height = 85
+        button_spacing = 20
+        start_y = 280
+
         for index, puzzle_file in enumerate(puzzles):
             puzzle_num = index + 1
-            label = f"Puzzle {puzzle_num}"
-            x_offset = (WINDOW_SIZE - BUTTON_WIDTH) // 2
-            y_offset = 260 + index * (BUTTON_HEIGHT + 20)
+            label = f"{puzzle_num}"
+
+            # Calculate grid position
+            row = index // max_cols
+            col = index % max_cols
+
+            # Center the grid
+            grid_width = max_cols * button_width + (max_cols - 1) * button_spacing
+            row_start_x = (WINDOW_SIZE - grid_width) // 2
+
+            x_offset = int(row_start_x + col * (button_width + button_spacing))
+            y_offset = int(start_y + row * (button_height + button_spacing))
 
             def make_callback(level_file: str, diff: str, num: int) -> Callable[[], None]:
                 def _callback() -> None:
@@ -400,15 +492,21 @@ def main() -> None:
                     auto_play = False
                 return _callback
 
-            menu_buttons.append(Button(label, (x_offset, y_offset), make_callback(puzzle_file, difficulty, puzzle_num)))
+            menu_buttons.append(Button(label, (x_offset, y_offset), make_callback(puzzle_file, difficulty, puzzle_num),
+                                     width=button_width, height=button_height))
 
-        # Add back button
-        back_btn_y = 260 + len(puzzles) * (BUTTON_HEIGHT + 20) + 20
-        def go_back():
+        # Add back button at bottom
+        num_rows = (len(puzzles) + max_cols - 1) // max_cols
+        back_btn_y = int(start_y + num_rows * (button_height + button_spacing) + 30)
+        back_btn_width = 140
+        back_btn_x = (WINDOW_SIZE - back_btn_width) // 2
+
+        def go_back() -> None:
             nonlocal menu_state
             menu_state = "difficulty_select"
             create_difficulty_menu()
-        menu_buttons.append(Button("< Back", ((WINDOW_SIZE - BUTTON_WIDTH) // 2, back_btn_y), go_back))
+        menu_buttons.append(Button("< Back", (back_btn_x, back_btn_y), go_back,
+                                  width=back_btn_width, height=BUTTON_HEIGHT))
 
     create_difficulty_menu()
 
@@ -438,10 +536,10 @@ def main() -> None:
                 if success_hold_timer <= 0:
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         mouse_x, mouse_y = event.pos
-                        if mouse_y < WINDOW_SIZE:
+                        if TOP_PANEL_HEIGHT < mouse_y < TOP_PANEL_HEIGHT + WINDOW_SIZE:
                             cell_size = WINDOW_SIZE // game.grid_size
                             grid_x = mouse_x // cell_size
-                            grid_y = mouse_y // cell_size
+                            grid_y = (mouse_y - TOP_PANEL_HEIGHT) // cell_size
                             newly_selected: Optional[str] = None
                             for car_id, car in game.cars.items():
                                 if any(cx == grid_x and cy == grid_y for cx, cy in car.occupy_cells()):
@@ -494,6 +592,7 @@ def main() -> None:
                                             solved = is_goal(game.current_state)
                                         if solved:
                                             trigger_success(f"SUCCESS! Cleared in {manual_move_count} moves.")
+                                            play_sound("win", 0.7)
                                             for _ in range(60):
                                                 x = random.uniform(WINDOW_SIZE * 0.25, WINDOW_SIZE * 0.75)
                                                 y = random.uniform(WINDOW_SIZE * 0.25, WINDOW_SIZE * 0.75)
@@ -501,10 +600,13 @@ def main() -> None:
                                         else:
                                             status_message = f"Moved {selected_car_id.upper()} {direction}."
                                             status_fade = 1.0
+                                            play_sound("move", 0.4)
                                     else:
                                         status_message = "Move blocked."
                                         status_fade = 1.0
                 for button in buttons:
+                    button.handle_event(event)
+                for button in undo_redo_buttons:
                     button.handle_event(event)
 
         if auto_play and game_state == "playing":
@@ -516,8 +618,10 @@ def main() -> None:
                 moved = game.step_solution()
                 if moved:
                     _push_undo_snapshot(prev_state, prev_manual)
+                    play_sound("move", 0.3)
                 else:
                     trigger_success("SUCCESS! Puzzle complete.")
+                    play_sound("win", 0.7)
                     # Final victory particles
                     for _ in range(40):
                         x = random.uniform(WINDOW_SIZE * 0.2, WINDOW_SIZE * 0.8)
@@ -570,11 +674,35 @@ def main() -> None:
             pygame.draw.line(screen, (80, 100, 140), (WINDOW_SIZE // 2 - 100, line_y),
                            (WINDOW_SIZE // 2 + 100, line_y), 2)
 
+            # Draw menu buttons with appropriate font
             for button in menu_buttons:
-                button.draw(screen, button_font)
+                # Use larger font for puzzle number buttons (square buttons)
+                if button.width == button.height and button.width == 85:
+                    button.draw(screen, puzzle_number_font)
+                else:
+                    button.draw(screen, button_font)
             pygame.display.flip()
             continue
         else:
+            # Draw top panel background
+            top_panel_surf = pygame.Surface((WINDOW_SIZE, TOP_PANEL_HEIGHT), pygame.SRCALPHA)
+            for y in range(TOP_PANEL_HEIGHT):
+                factor = y / TOP_PANEL_HEIGHT
+                color = (int(25 * (1 - factor * 0.2)), int(25 * (1 - factor * 0.2)), int(30 * (1 - factor * 0.2)), 255)
+                pygame.draw.line(top_panel_surf, color, (0, y), (WINDOW_SIZE, y))
+            screen.blit(top_panel_surf, (0, 0))
+
+            # Draw undo/redo buttons
+            for button in undo_redo_buttons:
+                button.draw(screen, arrow_font)
+
+            # Draw level title on top panel (right aligned)
+            level_text = font.render(f"Level: {selected_level}", True, (220, 220, 220))
+            level_rect = level_text.get_rect()
+            level_rect.right = WINDOW_SIZE - 15
+            level_rect.centery = TOP_PANEL_HEIGHT // 2
+            screen.blit(level_text, level_rect)
+
             # Update car animations
             game.update_animations()
 
@@ -659,7 +787,7 @@ def main() -> None:
                     detail_rect = detail_text.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 20))
                     board_surface.blit(detail_text, detail_rect)
 
-            screen.blit(board_surface, (0, 0))
+            screen.blit(board_surface, (0, TOP_PANEL_HEIGHT))
 
         # Draw particles
         for particle in particles:
@@ -672,40 +800,33 @@ def main() -> None:
             factor = y / panel_height
             color = (int(20 * (1 - factor * 0.3)), int(20 * (1 - factor * 0.3)), int(20 * (1 - factor * 0.3)), 255)
             pygame.draw.line(panel_surf, color, (0, y), (WINDOW_SIZE, y))
-        screen.blit(panel_surf, (0, WINDOW_SIZE))
+        screen.blit(panel_surf, (0, TOP_PANEL_HEIGHT + WINDOW_SIZE))
 
-        # Info display with icons and better formatting
-        info_data = [
-            ("🎯", f"Moves: {game.solution_index}/{len(game.solution_path)}", (150, 200, 255)),
-            ("🕹️", f"Manual Moves: {manual_move_count}", (255, 210, 120)),
-            ("🧠", f"Heuristic: {game.last_heuristic:.1f}", (255, 180, 100)),
-            ("📊", f"Expanded: {game.nodes_expanded}", (100, 255, 150)),
-            ("⭐", f"Level: {selected_level}", (255, 220, 100)),
-        ]
+        # Display moves info on same line as buttons
+        moves_y = TOP_PANEL_HEIGHT + WINDOW_SIZE + BUTTON_MARGIN + (BUTTON_HEIGHT // 2) - 8
 
-        start_x = WINDOW_SIZE - 360
-        start_y = WINDOW_SIZE + BUTTON_MARGIN + button_rows * (BUTTON_HEIGHT + BUTTON_MARGIN)
-        row_height = 22
+        # AI Moves
+        ai_moves_text = info_font.render(f"🎯 AI Moves: {game.solution_index}/{len(game.solution_path)}", True, (150, 200, 255))
+        screen.blit(ai_moves_text, (20, moves_y))
 
-        for idx, (icon, text, color) in enumerate(info_data):
-            row_y = start_y + idx * row_height
-            icon_surf = font.render(icon, True, color)
-            screen.blit(icon_surf, (start_x, row_y))
-            text_surf = font.render(text, True, (220, 220, 220))
-            screen.blit(text_surf, (start_x + 25, row_y))
+        # Manual Moves
+        manual_moves_text = info_font.render(f"🕹️ Manual: {manual_move_count}", True, (255, 210, 120))
+        screen.blit(manual_moves_text, (20, moves_y + BUTTON_HEIGHT + BUTTON_MARGIN))
 
-        status_y = start_y + len(info_data) * row_height + 10
+        status_y = TOP_PANEL_HEIGHT + WINDOW_SIZE + BUTTON_MARGIN + 2 * (BUTTON_HEIGHT + BUTTON_MARGIN) + 8
+        status_x = 20
 
         # Status message with fade and background
         if status_fade > 0:
-            status_bg = pygame.Surface((340, 30), pygame.SRCALPHA)
+            status_width = min(680, WINDOW_SIZE - 40)
+            status_bg = pygame.Surface((status_width, 28), pygame.SRCALPHA)
             bg_alpha = int(120 * status_fade)
             pygame.draw.rect(status_bg, (40, 40, 40, bg_alpha), status_bg.get_rect(), border_radius=8)
-            screen.blit(status_bg, (start_x - 5, status_y))
+            screen.blit(status_bg, (status_x - 5, status_y))
 
             status_color = (200 + int(55 * status_fade), 200 + int(55 * status_fade), 200 + int(55 * status_fade))
-            status_surf = font.render(status_message, True, status_color)
-            screen.blit(status_surf, (start_x, status_y + 4))
+            status_surf = info_font.render(status_message, True, status_color)
+            screen.blit(status_surf, (status_x, status_y + 6))
 
         for button in buttons:
             button.draw(screen, button_font)
