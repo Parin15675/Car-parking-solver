@@ -38,7 +38,7 @@ The project was created as part of an AI course to explore informed search (A*) 
 
 ## Tech Stack
 
-- **Language:** Python 3.x, Prolog (SWI‑Prolog)
+- **Language:** Python, Prolog (SWI‑Prolog)
 - **Libraries:**
   - `pygame` – rendering, input, audio, animation
   - `pyswip` – bridge between Python and SWI‑Prolog
@@ -48,13 +48,3 @@ The project was created as part of an AI course to explore informed search (A*) 
   - `search.py` – Python ↔ Prolog glue (calls `prolog_a_star/4`, `heuristic/2`, `goal_state/1`)
   - `logic.pl` – Prolog move rules, heuristic, and A* implementation
   - `puzzles/*.json` – level definitions
-
----
-
-## Installation
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/<your-username>/<your-repo>.git
-   cd <your-repo>
