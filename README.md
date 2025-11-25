@@ -1,7 +1,7 @@
 # Rush Hour AI Solver 
 
 
-![Game Screenshot](assets/p1.png)
+![Gameplay GIF](assets/g1.gif)
 
 
 An interactive Rush Hour–style puzzle game with an AI solver, built with Python, Pygame, and Prolog.  
